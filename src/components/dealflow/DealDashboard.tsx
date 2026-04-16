@@ -40,7 +40,7 @@ export function DealDashboard({ deal }: DealDashboardProps) {
           {deal.loan_type && (
             <p className="mt-1 text-xs text-slate-600">Loan: {deal.loan_type}</p>
           )}
-          <p className="mt-2 text-xs text-slate-500">Seller concessions</p>
+          {/* <p className="mt-2 text-xs text-slate-500">Seller concessions</p> */}
           <p className="text-sm font-medium text-slate-900">
             {formatSellerConcessions(deal.seller_concessions)}
           </p>

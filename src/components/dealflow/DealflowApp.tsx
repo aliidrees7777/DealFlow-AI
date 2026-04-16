@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LayoutDashboard } from "lucide-react";
+
 import type { ChatMessage, DealData } from "@/types/deal";
 import { normalizeClosingInput } from "@/lib/closing-input";
 import {
@@ -15,6 +15,7 @@ import { DealDashboard } from "./DealDashboard";
 import { DealInput } from "./DealInput";
 import { DealTimeline } from "./DealTimeline";
 import { FollowUpQuestions } from "./FollowUpQuestions";
+import Header from "../layout/Header";
 
 const CHAT_INITIAL_AFTER_DEAL = (): ChatMessage[] => [
   {
@@ -41,6 +42,8 @@ export function DealflowApp() {
   >({});
   const [toast, setToast] = useState<string | null>(null);
   const stepTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [stepQuestion, setStepQuestion] = useState<string | null>(null);
+const [isComplete, setIsComplete] = useState(false);
 
   useEffect(() => {
     if (!loading) {
@@ -147,21 +150,7 @@ export function DealflowApp() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100/90">
-      <header className="border-b border-slate-200/80 bg-white/90 backdrop-blur-sm">
-        <div className="mx-auto flex max-w-[1400px] items-center gap-3 px-4 py-4 sm:px-6">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm">
-            <LayoutDashboard className="h-5 w-5" />
-          </div>
-          <div>
-            <h1 className="text-lg font-semibold tracking-tight text-slate-900">
-              DealFlow AI
-            </h1>
-            <p className="text-xs text-slate-500">
-              Transaction coordinator demo
-            </p>
-          </div>
-        </div>
-      </header>
+    <Header/>
 
       <div className="mx-auto flex max-w-[1400px] flex-col gap-6 px-4 py-6 lg:flex-row lg:items-start lg:gap-8 lg:px-6">
         <main className="min-w-0 flex-1 space-y-6 transition-all duration-300">

@@ -1,3 +1,4 @@
+// app/layout.tsx
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
@@ -18,18 +19,14 @@ export const metadata: Metadata = {
   description:
     "AI-powered deal extraction, contract preview, and context-aware assistant.",
 };
+import Header from "@/components/layout/Header";
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased`}
-      >
-        {children}
+      <body>
+        <Header /> {/* Header hamesha yahan rahega */}
+        {children} {/* Yahan / ya /dealspage ka content load hoga */}
       </body>
     </html>
   );
