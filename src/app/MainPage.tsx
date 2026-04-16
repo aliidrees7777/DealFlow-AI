@@ -7,7 +7,6 @@ import { ContractPreview } from "@/components/deal/ContractPreview";
 import DealDashboard from "@/components/deal/DealDashboard";
 import MasterDashboard from '@/components/deal/MasterDashboard';
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles } from 'lucide-react';
 import type { ChatMessage, DealData } from "@/types/deal";
 import { DealTimeline } from '@/components/deal/DealTimeline';
 
@@ -50,89 +49,10 @@ useEffect(() => {
   if (saved) setDealData(JSON.parse(saved));
 }, []);
 
-// const handleProcessDeal = useCallback(async (input: string) => {
-//   if (!input.trim()) return;
-
-//   setMessages(prev => [...prev, { id: `u-${Date.now()}`, role: "user", content: input }]);
-  
-//   const lowerInput = input.toLowerCase();
-
-//   // 1. SMART CHECK: Agar user "missing" ya "fields" ya "status" puche
-//   const isStatusQuery = lowerInput.includes("missing") || lowerInput.includes("status") || lowerInput.includes("what field");
-
-//   if (isStatusQuery) {
-//     // Direct AI chat ko bhejein, extraction ko nahi
-//     await handleGeneralChat(input);
-//     return;
-//   }
-
-//   // 2. SHORTCUT CHECK (for summary/email)
-//   if (lowerInput.includes("summary") || lowerInput.includes("email")) {
-//     await handleGeneralChat(input);
-//     return;
-//   }
-
-//   setLoading(true);
-
-//   try {
-//     const res = await fetch("/api/extract", {
-//       method: "POST",
-//       headers: { "Content-Type": "application/json" },
-//       body: JSON.stringify({
-//         input,
-//         existingDeal: dealDataRef.current // Purana data lazmi bhejein
-//       })
-//     });
-
-//     const data = await res.json();
-
-//     // UPDATE STATE: Pehle data save karein phir message dikhayein
-//     if (data.deal) {
-//       const merged = { ...dealDataRef.current, ...data.deal };
-//       setDealData(merged);
-//       dealDataRef.current = merged;
-//     }
-
-//     // 3. PENDING RESPONSE (Jab AI ko mazeed malomat chahiye hon)
-//     if (data.status === "pending" || data.question) {
-//       setMessages(prev => [...prev, {
-//         id: `a-${Date.now()}`,
-//         role: "assistant",
-//         content: data.question || "I need a few more details to complete the contract."
-//       }]);
-//       return;
-//     }
-
-//     // 4. COMPLETE RESPONSE
-//     if (data.status === "complete") {
-//       setActiveTab("Contracts");
-//       setMessages(prev => [...prev, {
-//         id: `a-${Date.now()}`,
-//         role: "assistant",
-//         content: `Got it! Offer details for ${data.deal?.address || dealDataRef.current?.address || 'the property'} are updated.`
-//       }]);
-//       return;
-//     }
-
-//     // Fallback
-//     await handleGeneralChat(input);
-
-//   } catch (error) {
-//     console.error("Error:", error);
-//   } finally {
-//     setLoading(false);
-//   }
-// }, [handleGeneralChat]);
-
 
 
 const handleProcessDeal = useCallback(async (input: string) => {
   if (!input.trim()) return;
-
-  setMessages(prev => [
-    ...prev,
-    { id: `u-${Date.now()}`, role: "user", content: input }
-  ]);
 
   const lowerInput = input.toLowerCase();
 
