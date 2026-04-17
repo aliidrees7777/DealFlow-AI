@@ -38,6 +38,7 @@ export function normalizeDeal(raw: Partial<Record<keyof DealData, unknown>>): De
     loan_type: typeof raw.loan_type === "string" ? raw.loan_type : null,
     closing_date: typeof raw.closing_date === "string" ? raw.closing_date : null,
     buyer_name: typeof raw.buyer_name === "string" ? raw.buyer_name : null,
+    seller_name: typeof raw.seller_name === "string" ? raw.seller_name : null,
     seller_concessions: coerceSellerConcessions(raw.seller_concessions),
     inspection_days: coerceInspectionDays(raw.inspection_days),
   };

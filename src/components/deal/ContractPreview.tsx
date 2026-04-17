@@ -1,22 +1,14 @@
 "use client";
-import clsx from "clsx";
 import jsPDF from "jspdf";
 import React, { useMemo } from "react";
 import type { DealData } from "@/types/deal";
-import {
-  Download,
-  PenTool,
-  Send,
-  ShieldCheck,
-  Landmark,
-  Calendar,
-} from "lucide-react";
+import { Download, PenTool, Send } from "lucide-react";
 
-interface DealDashboardProps {
-  deal: DealData;
+interface ContractPreviewProps {
+  deal?: Partial<DealData>;
 }
 
-export const ContractPreview = ({ deal }: DealDashboardProps) => {
+export const ContractPreview = ({ deal = {} }: ContractPreviewProps) => {
   const progress = useMemo(() => {
     const fields = [
       deal.address,
@@ -26,343 +18,302 @@ export const ContractPreview = ({ deal }: DealDashboardProps) => {
       deal.closing_date,
       deal.inspection_days,
     ];
-    const filledFields = fields.filter(
-      (field) => field !== undefined && field !== null && field !== "",
-    ).length;
-    return Math.round((filledFields / fields.length) * 100);
+    const filled = fields.filter((f) => f !== undefined && f !== null && f !== "").length;
+    return Math.round((filled / fields.length) * 100);
   }, [deal]);
 
-
+  // ─── PDF Export matching the screenshot style ────────────────────────────
   const handleExportPDF = () => {
-    console.log("Hello World");
     const doc = new jsPDF({ unit: "pt", format: "letter" });
-    const margin = 60;
     const pageW = doc.internal.pageSize.getWidth();
-    let y = 60;
+    const margin = 56;
+    let y = 52;
 
-    const line = (text: string, size = 10, bold = false, color = "#000000") => {
+    const setFont = (size: number, style: "normal" | "bold" | "italic" = "normal", color = "#111111") => {
       doc.setFontSize(size);
-      doc.setFont("helvetica", bold ? "bold" : "normal");
+      doc.setFont("helvetica", style);
       doc.setTextColor(color);
-      doc.text(text, margin, y);
-      y += size * 1.6;
     };
 
-    const divider = () => {
-      doc.setDrawColor("#cccccc");
+    const text = (t: string, x: number, opts?: { align?: "center" | "left" | "right" }) => {
+      doc.text(t, x, y, opts);
+    };
+
+    const nl = (n = 1, size = 11) => { y += size * 1.5 * n; };
+
+    const rule = (color = "#dddddd") => {
+      doc.setDrawColor(color);
       doc.line(margin, y, pageW - margin, y);
-      y += 12;
+      y += 14;
     };
 
-    // Header
-    doc.setFontSize(14);
-    doc.setFont("helvetica", "bold");
-    doc.text("CALIFORNIA RESIDENTIAL PURCHASE AGREEMENT", pageW / 2, y, {
-      align: "center",
-    });
+    const field = (label: string, value: string | null | undefined) => {
+      setFont(8, "normal", "#888888");
+      text(label.toUpperCase(), margin);
+      y += 13;
+      setFont(10, "bold", "#111111");
+      text(value || "________________________", margin);
+      y += 18;
+    };
+
+    // ── Title block ────────────────────────────────────────────────────────
+    setFont(16, "bold", "#111111");
+    text("PURCHASE AGREEMENT", pageW / 2, { align: "center" });
+    nl(0.5, 10);
+    setFont(9, "normal", "#888888");
+    text(`Prepared: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`, pageW / 2, { align: "center" });
+    y += 24;
+    rule("#111111");
+
+    // ── Property & Parties ────────────────────────────────────────────────
+    field("ADDRESS", deal.address);
+    field("BUYER", deal.buyer_name);
+    field("SELLER", deal.seller_name || "________________________");
+    rule();
+
+    // ── Financial ─────────────────────────────────────────────────────────
+    setFont(8, "normal", "#888888");
+    text("PRICE", margin);
+    y += 13;
+    setFont(13, "bold", "#111111");
+    text(deal.price ? `$${Number(deal.price).toLocaleString()}` : "$ ________________________", margin);
+    nl(0.5, 10);
+
+    // Two columns
+    const col2 = pageW / 2 + 8;
+    const colY = y;
+    setFont(8, "normal", "#888888");
+    text("LOAN TYPE", margin);
+    doc.text("SELLER CONCESSIONS", col2, colY);
+    y += 13;
+    setFont(10, "bold", "#111111");
+    text(deal.loan_type || "________________________", margin);
+    const concVal = deal.seller_concessions ? `$${Number(deal.seller_concessions).toLocaleString()}` : "$0.00";
+    doc.text(concVal, col2, y);
+    y += 24;
+    rule();
+
+    // ── Key Terms ─────────────────────────────────────────────────────────
+    setFont(9, "bold", "#111111");
+    text("KEY TERMS", margin);
+    y += 16;
+
+    const terms = [
+      `1. Purchase: Buyer agrees to purchase and Seller agrees to sell under agreed terms.`,
+      `2. Financing: Subject to Buyer securing ${deal.loan_type || "financing"} on time.`,
+      `3. Inspection: Buyer may inspect and request repairs or cancel within ${deal.inspection_days || "10"} calendar days.`,
+      `4. Closing: To be completed by ${deal.closing_date || "the agreed closing date"}.`,
+      `5. Default: Failure to perform may lead to legal action.`,
+    ];
+
+    setFont(8.5, "normal", "#333333");
+    for (const term of terms) {
+      const lines = doc.splitTextToSize(term, pageW - margin * 2) as string[];
+      for (const line of lines) {
+        doc.text(line, margin, y);
+        y += 13;
+      }
+      y += 3;
+    }
+
+    rule();
+
+    // ── Signatures ────────────────────────────────────────────────────────
+    y += 10;
+    setFont(8, "normal", "#888888");
+    text("SIGNATURE", margin);
     y += 20;
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "normal");
-    doc.text("(C.A.R. FORM RPA)", pageW / 2, y, { align: "center" });
-    y += 30;
-    divider();
-
-    line(`Date Prepared: ${new Date().toLocaleDateString()}`, 10);
-    y += 8;
-
-    line("1. OFFER:", 11, true);
-    line(
-      `   A. THIS IS AN OFFER FROM: ${deal.buyer_name || "________________________"} ("Buyer")`,
-    );
-    line(
-      `   B. THE PROPERTY to be acquired is: ${deal.address || "________________________"}`,
-    );
-    y += 8;
-    divider();
-
-    line("2. FINANCIAL TERMS:", 11, true);
-    line(`   Purchase Price: $${deal.price || "________________"}`);
-    line(`   Loan Type: ${deal.loan_type || "________________"}`);
-    line(`   Seller Concessions: $${deal.seller_concessions || "0.00"}`);
-    y += 8;
-    divider();
-
-    line("3. DATES & CONTINGENCIES:", 11, true);
-    line(
-      `   Close of Escrow (COE): ${deal.closing_date || "________________"}`,
-    );
-    line(
-      `   Inspection Period: ${deal.inspection_days || "10"} calendar days from acceptance`,
-    );
-    y += 8;
-    divider();
-
-    // Signature block
-    y += 20;
-    line("BUYER SIGNATURE:", 10, true);
-    y += 30;
-    doc.setDrawColor("#000000");
+    doc.setDrawColor("#111111");
     doc.line(margin, y, margin + 200, y);
-    doc.text("Buyer", margin, y + 14);
-    doc.line(pageW - margin - 200, y, pageW - margin, y);
-    doc.text("Date", pageW - margin - 200, y + 14);
-    y += 40;
-    line("SELLER SIGNATURE:", 10, true);
-    y += 30;
+    doc.line(col2, y, col2 + 160, y);
+    y += 14;
+    setFont(8, "normal", "#888888");
+    text("BUYER SIGNATURE", margin);
+    doc.text("SELLER SIGNATURE", col2, y);
+    y += 24;
     doc.line(margin, y, margin + 200, y);
-    doc.text("Seller", margin, y + 14);
-    doc.line(pageW - margin - 200, y, pageW - margin, y);
-    doc.text("Date", pageW - margin - 200, y + 14);
+    doc.line(col2, y, col2 + 160, y);
+    y += 14;
+    setFont(8, "normal", "#888888");
+    text("DATE", margin);
+    doc.text("DATE", col2, y);
 
     doc.save(`Purchase_Agreement_${deal.address || "Draft"}.pdf`);
   };
 
+  // ── Render: white card matching screenshot ──────────────────────────────
   return (
-    <div className="max-w-5xl mx-auto space-y-8 pb-20">
-      {/* 1. DOCUMENT TOP BAR */}
-      <div className="flex flex-col md:flex-row justify-between items-end gap-4 border-b border-white/5 pb-6">
-        <div className="space-y-1">
-          <p className="text-[10px] uppercase tracking-[0.4em] text-secondary font-bold">
+    <div className="max-w-5xl mx-auto space-y-6 pb-20">
+
+      {/* Action buttons row — matches screenshot bottom buttons */}
+      <div className="flex items-center justify-between border-b border-white/5 pb-5">
+        <div>
+          <p className="text-[10px] uppercase tracking-[0.4em] text-secondary font-bold mb-1">
             Standard Real Estate Form
           </p>
-          <h2 className="text-3xl font-light text-neutral tracking-tight">
+          <h2 className="text-2xl font-light text-neutral">
             Residential{" "}
             <span className="font-semibold text-white">Purchase Agreement</span>
           </h2>
         </div>
-        <div className="flex items-center gap-6">
-          <div className="text-right">
-            <p className="text-[10px] text-white/20 uppercase tracking-widest">
-              Completion
-            </p>
-            <p className="text-xl font-mono text-secondary">{progress}%</p>
-          </div>
-          <div className="h-12 w-[1px] bg-white/5" />
-          <span
-            className={clsx(
-              "text-[9px] px-4 py-2 rounded-full border font-bold uppercase tracking-[0.2em]",
-              progress === 100
-                ? "bg-secondary/20 text-secondary border-secondary/30 shadow-[0_0_15px_rgba(var(--secondary-rgb),0.1)]"
-                : "bg-white/5 text-white/30 border-white/10",
-            )}
-          >
-            {progress === 100 ? "Execution Ready" : "Drafting Mode"}
-          </span>
-        </div>
+        <span
+          className={`text-[9px] px-4 py-2 rounded-full border font-bold uppercase tracking-[0.2em] ${
+            progress === 100
+              ? "bg-secondary/20 text-secondary border-secondary/30"
+              : "bg-white/5 text-white/30 border-white/10"
+          }`}
+        >
+          {progress === 100 ? "Execution Ready" : `${progress}% Complete`}
+        </span>
       </div>
 
-      {/* 2. MAIN CONTRACT BODY */}
-      <div className="bg-primary-dark/60 backdrop-blur-2xl border border-white/5 rounded-[2.5rem] p-12 shadow-2xl relative overflow-hidden">
-        {/* Subtle Legal Watermark */}
-        <div className="absolute top-20 right-10 opacity-[0.02] pointer-events-none select-none">
-          <div className="text-[140px] font-black leading-none rotate-12">
-            OFFER
+      {/* ── White contract card — matching screenshot ── */}
+      <div className="bg-white rounded-2xl shadow-2xl overflow-hidden">
+        <div className="px-10 py-8">
+
+          {/* Doc title */}
+          <div className="text-center mb-6 pb-6 border-b border-gray-200">
+            <h3 className="font-black text-gray-900 text-base tracking-widest uppercase">
+              Purchase Agreement
+            </h3>
           </div>
-        </div>
 
-        <div className="relative z-10 space-y-12">
-          {/* SECTION 1: PARTIES & PROPERTY */}
-          <section className="space-y-6">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="h-4 w-[2px] bg-secondary" />
-              <h4 className="text-xs font-bold uppercase tracking-[0.3em] text-neutral">
-                Section I: Parties & Property
-              </h4>
-            </div>
-
-            <p className="text-neutral/70 leading-[1.8] text-justify font-light">
-              This agreement is entered into this date of
-              <span className="text-neutral font-semibold mx-1 border-b border-white/20 px-2 italic">
-                {new Date().toLocaleDateString()}
-              </span>
-              by and between
-              <span
-                className={clsx(
-                  "mx-1 border-b px-3 font-medium",
-                  deal.buyer_name
-                    ? "text-white border-secondary/40"
-                    : "text-white/20 border-white/5 italic",
-                )}
-              >
-                {deal.buyer_name || "[Buyer Name Pending]"}
-              </span>
-              (hereinafter &quot;Buyer&quot;) and the Seller of record. The
-              Buyer agrees to purchase and the Seller agrees to sell the real
-              property situated in the county of
-              <span className="text-neutral font-medium mx-1 italic">
-                Lake, California
-              </span>
-              , commonly known as:
-            </p>
-
-            <div className="bg-white/[0.03] border border-white/5 p-6 rounded-2xl group hover:border-secondary/20 transition-all">
-              <p
-                className={clsx(
-                  "text-xl tracking-tight transition-all",
-                  deal.address
-                    ? "text-neutral"
-                    : "text-white/10 italic font-light",
-                )}
-              >
-                {deal.address ||
-                  "Please provide property address to finalize fragment..."}
+          {/* Address + Price row */}
+          <div className="grid grid-cols-2 gap-6 mb-6">
+            <div>
+              <p className="text-[9px] text-gray-400 uppercase tracking-widest font-semibold mb-1">
+                Address
+              </p>
+              <p className="text-sm font-bold text-gray-900">
+                {deal.address || <span className="text-gray-300 font-normal italic">Not provided</span>}
               </p>
             </div>
-          </section>
-
-          {/* SECTION 2: FINANCIAL TERMS */}
-          <section className="space-y-6">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="h-4 w-[2px] bg-accent" />
-              <h4 className="text-xs font-bold uppercase tracking-[0.3em] text-neutral">
-                Section II: Financial Considerations
-              </h4>
+            <div>
+              <p className="text-[9px] text-gray-400 uppercase tracking-widest font-semibold mb-1">
+                Price
+              </p>
+              <p className="text-sm font-bold text-gray-900">
+                {deal.price
+                  ? `$${Number(deal.price).toLocaleString()}`
+                  : <span className="text-gray-300 font-normal italic">Not provided</span>}
+              </p>
             </div>
+          </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              <div className="space-y-4">
-                <p className="text-neutral/70 leading-relaxed font-light">
-                  The total purchase price for the property shall be the sum of:
-                </p>
-                <div className="text-4xl font-light tracking-tighter text-accent">
-                  {deal.price ? `$ ${deal.price}` : "$ — — — , — — —"}
-                </div>
-                <p className="text-[10px] text-white/30 uppercase tracking-widest">
-                  Payable in U.S. Dollars at Closing
-                </p>
-              </div>
-
-              <div className="bg-white/[0.02] p-6 rounded-2xl border border-white/5 space-y-4">
-                <div className="flex justify-between items-center pb-3 border-b border-white/5">
-                  <div className="flex items-center gap-2">
-                    <Landmark className="w-3.5 h-3.5 text-secondary-light/40" />
-                    <span className="text-[11px] text-secondary-light/60 uppercase">
-                      Financing Type
-                    </span>
-                  </div>
-                  <span className="text-sm text-neutral font-medium">
-                    {deal.loan_type || "TBD"}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <div className="flex items-center gap-2">
-                    <ShieldCheck className="w-3.5 h-3.5 text-secondary-light/40" />
-                    <span className="text-[11px] text-secondary-light/60 uppercase">
-                      Seller Concessions
-                    </span>
-                  </div>
-                  <span className="text-sm text-accent font-medium">
-                    {deal.seller_concessions
-                      ? `$ ${deal.seller_concessions}`
-                      : "$ 0.00"}
-                  </span>
-                </div>
-              </div>
+          {/* Buyer + Seller */}
+          <div className="grid grid-cols-2 gap-6 mb-6">
+            <div>
+              <p className="text-[9px] text-gray-400 uppercase tracking-widest font-semibold mb-1">
+                Buyer
+              </p>
+              <p className="text-sm font-bold text-gray-900">
+                {deal.buyer_name || <span className="text-gray-300 font-normal italic">Not provided</span>}
+              </p>
             </div>
-          </section>
-
-          {/* SECTION 3: CONTINGENCIES & CLOSING */}
-          <section className="space-y-6 pt-4">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="h-4 w-[2px] bg-secondary" />
-              <h4 className="text-xs font-bold uppercase tracking-[0.3em] text-neutral">
-                Section III: Dates & Contingencies
-              </h4>
+            <div>
+              <p className="text-[9px] text-gray-400 uppercase tracking-widest font-semibold mb-1">
+                Seller
+              </p>
+              <p className="text-sm font-bold text-gray-900">
+                {deal.seller_name || <span className="text-gray-300 font-normal italic">Not provided</span>}
+              </p>
             </div>
+          </div>
 
-            <p className="text-neutral/70 leading-[1.8] font-light">
-              This offer is contingent upon a satisfactory home inspection to be
-              completed within
-              <span className="text-neutral font-bold mx-1 border-b border-white/10 px-2 italic">
-                {deal.inspection_days || "10"} calendar days
-              </span>
-              of acceptance. Furthermore, the parties agree that the close of
-              escrow (Closing Date) shall occur on or before:
+          {/* Loan + Closing */}
+          <div className="grid grid-cols-2 gap-6 mb-6 pb-6 border-b border-gray-100">
+            <div>
+              <p className="text-[9px] text-gray-400 uppercase tracking-widest font-semibold mb-1">
+                Loan
+              </p>
+              <p className="text-sm font-bold text-gray-900">
+                {deal.loan_type || <span className="text-gray-300 font-normal italic">Not provided</span>}
+              </p>
+            </div>
+            <div>
+              <p className="text-[9px] text-gray-400 uppercase tracking-widest font-semibold mb-1">
+                Closing
+              </p>
+              <p className="text-sm font-bold text-gray-900">
+                {deal.closing_date || <span className="text-gray-300 font-normal italic">Not provided</span>}
+              </p>
+            </div>
+          </div>
+
+          {/* Key Terms */}
+          <div className="mb-6 space-y-2">
+            {[
+              { n: "1", label: "Purchase:", body: "Buyer agrees to purchase and Seller agrees to sell under agreed terms." },
+              { n: "2", label: "Financing:", body: `Subject to Buyer securing ${deal.loan_type || "financing"} on time.` },
+              { n: "3", label: "Inspection:", body: `Buyer may inspect and request repairs or cancel within ${deal.inspection_days || "10"} days.` },
+              { n: "4", label: "Closing:", body: `To be completed by ${deal.closing_date || "the agreed date"} unless extended.` },
+              { n: "5", label: "Default:", body: "Failure to perform may lead to legal action." },
+            ].map((t) => (
+              <p key={t.n} className="text-[11px] text-gray-600 leading-relaxed">
+                <span className="text-gray-400 mr-1">{t.n}.</span>
+                <span className="font-semibold text-gray-800">{t.label}</span>{" "}
+                {t.body}
+              </p>
+            ))}
+          </div>
+
+          {/* Signature lines */}
+          <div className="pt-4 border-t border-gray-200 space-y-6">
+            <p className="text-[9px] text-gray-400 uppercase tracking-widest font-semibold">
+              Signature
             </p>
-
-            <div className="flex items-center gap-4 bg-secondary/5 border border-secondary/10 p-5 rounded-2xl w-fit">
-              <Calendar className="w-5 h-5 text-secondary" />
+            <div className="grid grid-cols-2 gap-10">
               <div>
-                <p className="text-[10px] text-secondary/60 uppercase font-bold tracking-widest">
-                  Closing Schedule
-                </p>
-                <p className="text-lg text-neutral font-medium">
-                  {deal.closing_date || "Pending Approval"}
+                <div className="border-b border-gray-300 h-8 mb-1" />
+                <p className="text-[9px] text-gray-400 uppercase tracking-widest">
+                  Buyer Signature
                 </p>
               </div>
-            </div>
-          </section>
-
-          {/* SIGNATURE AREA */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-12 pt-16 border-t border-white/5">
-            <div className="space-y-4">
-              <p className="text-[10px] uppercase tracking-widest text-white/50">
-                Buyer Signature
-              </p>
-              <div className="h-16 border-b border-dashed border-white/10 flex items-center px-4">
-                {deal.buyer_name && (
-                  <span className="font-serif text-2xl text-secondary/60 italic opacity-50 select-none">
-                    {deal.buyer_name}
-                  </span>
-                )}
+              <div>
+                <div className="border-b border-gray-300 h-8 mb-1" />
+                <p className="text-[9px] text-gray-400 uppercase tracking-widest">
+                  Seller Signature
+                </p>
               </div>
-            </div>
-            <div className="space-y-4">
-              <p className="text-[10px] uppercase tracking-widest text-white/50">
-                Seller Signature
-              </p>
-              <div className="h-16 border-b border-dashed border-white/30" />
             </div>
           </div>
         </div>
-      </div>
 
-      {/* 3. ACTION CONTROLS */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <button className="flex items-center justify-center gap-3 bg-white/5 border border-white/10 hover:bg-secondary/10 hover:border-secondary/40 text-neutral py-5 rounded-[1.5rem] transition-all group overflow-hidden relative">
-          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
-          <PenTool className="w-4 h-4 text-secondary" />
-          <span className="text-[10px] font-bold uppercase tracking-[0.2em]">
-            Sign Document
-          </span>
-        </button>
-
-        <button
-          onClick={handleExportPDF}
-          className="flex items-center justify-center gap-3 bg-white/5 ..."
-        >
-          <Download className="w-4 h-4 text-white/60" />
-          <span className="text-[10px] font-bold uppercase tracking-[0.2em]">
+        {/* Bottom action strip — matches screenshot "Sign Doc / Export PDF / Send to Parties" */}
+        <div className="grid grid-cols-3 border-t border-gray-200">
+          <button className="flex items-center justify-center gap-2 py-4 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition-colors border-r border-gray-200">
+            <PenTool className="w-3.5 h-3.5" />
+            Sign Doc
+          </button>
+          <button
+            onClick={handleExportPDF}
+            className="flex items-center justify-center gap-2 py-4 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition-colors border-r border-gray-200"
+          >
+            <Download className="w-3.5 h-3.5" />
             Export PDF
-          </span>
-        </button>
-
-        <button
-          disabled={progress < 100}
-          className="flex items-center justify-center gap-3 bg-secondary/20 border border-secondary/30 hover:bg-secondary/30 text-white py-5 rounded-[1.5rem] transition-all disabled:opacity-10"
-        >
-          <Send className="w-4 h-4" />
-          <span className="text-[10px] font-bold uppercase tracking-[0.2em]">
+          </button>
+          <button
+            disabled={progress < 100}
+            className="flex items-center justify-center gap-2 py-4 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-30"
+          >
+            <Send className="w-3.5 h-3.5" />
             Send to Parties
-          </span>
-        </button>
+          </button>
+        </div>
       </div>
 
-      {/* STATUS INDICATOR */}
-      <div className="p-8 rounded-[2rem] bg-gradient-to-tr from-secondary/5 via-transparent to-transparent border border-white/5">
-        <div className="flex items-center gap-3 mb-3">
-          <div className="w-2 h-2 bg-secondary rounded-full animate-pulse" />
+      {/* AI status note */}
+      <div className="p-6 rounded-2xl bg-gradient-to-tr from-secondary/5 via-transparent to-transparent border border-white/5">
+        <div className="flex items-center gap-2 mb-2">
+          <div className="w-1.5 h-1.5 bg-secondary rounded-full animate-pulse" />
           <p className="text-[10px] text-secondary font-bold uppercase tracking-widest">
-            AI Suggession
+            AI Status
           </p>
         </div>
-        <p className="text-sm text-neutral/40 leading-relaxed font-light italic">
-          &quot;The contract logic has identified **{progress}%** of the
-          required transaction artifacts.
-          {progress < 100
-            ? " Please provide the missing fields to enable digital execution."
-            : " All compliance checks passed. Document is ready for legal binding."}
-          &quot;
+        <p className="text-xs text-neutral/40 font-light italic">
+          {progress === 100
+            ? "All fields collected. Contract is ready for review and signing."
+            : `${progress}% complete — provide the remaining fields to finalize the contract.`}
         </p>
       </div>
     </div>
