@@ -5,6 +5,7 @@ export type DealData = {
   /** Verbatim or YYYY-MM-DD — never auto-modified after extraction */
   closing_date: string | null;
   buyer_name: string | null;
+  seller_name: string | null;
   seller_concessions: number | null;
   inspection_days: number | null;
 };

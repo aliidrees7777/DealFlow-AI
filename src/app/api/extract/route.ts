@@ -1,349 +1,226 @@
-// import { NextResponse } from "next/server";
-// import OpenAI from "openai";
-// import { mockExtractDeal } from "@/lib/mock-extract";
-// import { normalizeDeal } from "@/lib/normalize-deal";
-
-// const EXTRACTION_PROMPT = `Extract structured real estate deal data from the input.
-
-// Return ONLY valid JSON with:
-// - address (string)
-// - price (number)
-// - loan_type (string)
-// - closing_date (string EXACTLY as mentioned, DO NOT modify or infer year)
-// - buyer_name (string or null)
-// - seller_concessions (number if mentioned, else null)
-// - inspection_days (number if mentioned, else null)
-
-// IMPORTANT RULES:
-// - DO NOT change dates
-// - DO NOT assume missing values
-// - If not provided, return null
-// - Extract seller concessions from phrases like:
-//   'seller pays', 'seller to cover', 'credit', 'closing cost help'
-
-// Input:`;
-
-// export async function POST(req: Request) {
-//   let input = "";
-//   try {
-//     const body = (await req.json()) as { input?: string };
-//     input = typeof body.input === "string" ? body.input : "";
-//     if (!input.trim()) {
-//       return NextResponse.json({ error: "Missing input" }, { status: 400 });
-//     }
-
-//     const key = process.env.OPENAI_API_KEY;
-//     if (!key) {
-//       return NextResponse.json({ deal: mockExtractDeal(input) });
-//     }
-
-//     const openai = new OpenAI({ apiKey: key });
-//     const completion = await openai.chat.completions.create({
-//       model: "gpt-4o-mini",
-//       messages: [
-//         { role: "system", content: EXTRACTION_PROMPT },
-//         { role: "user", content: input },
-//       ],
-//       response_format: { type: "json_object" },
-//       temperature: 0.1,
-//     });
-
-//     const raw = completion.choices[0]?.message?.content;
-//     if (!raw) {
-//       return NextResponse.json({ deal: mockExtractDeal(input) });
-//     }
-
-//     const parsed = JSON.parse(raw) as Partial<Record<string, unknown>>;
-//     // const deal = normalizeDeal(parsed);
-//     // return NextResponse.json({ deal });
-//     const deal = normalizeDeal(parsed);
-
-// const missingFields = [];
-// if (!deal.address) missingFields.push("address");
-// if (!deal.price) missingFields.push("price");
-// if (!deal.loan_type) missingFields.push("loan_type");
-// if (!deal.buyer_name) missingFields.push("buyer_name");
-// if (!deal.closing_date) missingFields.push("closing_date");
-
-// if (missingFields.length > 0) {
-//   return NextResponse.json({
-//     status: "pending",
-//     field: missingFields[0],
-//     question: `Please provide ${missingFields[0]}`
-//   });
-// }
-
-// return NextResponse.json({
-//   status: "complete",
-//   deal
-// });
-//   } catch {
-//     return NextResponse.json({ deal: mockExtractDeal(input) });
-//   }
-// }
-
-
-
-
-
-// import { NextResponse } from "next/server";
-// import OpenAI from "openai";
-// import { mockExtractDeal } from "@/lib/mock-extract";
-// import { normalizeDeal } from "@/lib/normalize-deal";
-
-// const EXTRACTION_PROMPT = `
-// You are a real estate extraction system. 
-// Extract data into JSON. 
-
-// CRITICAL RULES:
-// 1. Compare "input" with "existingDeal".
-// 2. If the user provides NEW info, update the field.
-// 3. If information is missing, set the field to null.
-// 4. If the user is answering a previous question (e.g., just providing a name or price), map it to the correct field.
-// 5. NEVER return "TBD" or "Pending" in JSON, use null.
-
-// FIELDS:
-// - address
-// - price
-// - loan_type
-// - closing_date
-// - buyer_name
-// - seller_concessions
-// - inspection_days
-// `;
-
-// export async function POST(req: Request) {
-//   try {
-//     const body = await req.json() as {
-//       input?: string;
-//       existingDeal?: any;
-//     };
-
-//     const input = body.input || "";
-//     const existingDeal = body.existingDeal || {};
-
-//     if (!input.trim()) {
-//       return NextResponse.json({ error: "Missing input" }, { status: 400 });
-//     }
-
-//     const key = process.env.OPENAI_API_KEY;
-
-//     if (!key) {
-//       const mock = mockExtractDeal(input);
-//       return NextResponse.json({ status: "complete", deal: mock });
-//     }
-
-//     const openai = new OpenAI({ apiKey: key });
-
-//     const completion = await openai.chat.completions.create({
-//       model: "gpt-4o-mini",
-//       messages: [
-//         { role: "system", content: EXTRACTION_PROMPT },
-//         {
-//           role: "user",
-//           content: `existingDeal: ${JSON.stringify(existingDeal)}\n\ninput: ${input}`
-//         }
-//       ],
-//       response_format: { type: "json_object" },
-//       temperature: 0.1,
-//     });
-
-//     const raw = completion.choices[0]?.message?.content;
-//     if (!raw) throw new Error("No AI response");
-
-//     const parsed = JSON.parse(raw);
-//     const newData = normalizeDeal(parsed);
-
-//     // ✅ FIXED MERGE LOGIC: New data gets priority, but keeps old data if new is null
-//     const deal = {
-//       address: newData.address || existingDeal.address || null,
-//       price: newData.price ?? existingDeal.price ?? null,
-//       loan_type: newData.loan_type || existingDeal.loan_type || null,
-//       closing_date: newData.closing_date || existingDeal.closing_date || null,
-//       buyer_name: newData.buyer_name || existingDeal.buyer_name || null,
-//       seller_concessions: newData.seller_concessions ?? existingDeal.seller_concessions ?? null,
-//       inspection_days: newData.inspection_days ?? existingDeal.inspection_days ?? null,
-//     };
-
-//     // 🧠 Missing fields detection with better names
-//     const missingFields: string[] = [];
-//     if (!deal.address) missingFields.push("Property Address");
-//     if (!deal.price) missingFields.push("Purchase Price");
-//     if (!deal.buyer_name) missingFields.push("Buyer Name");
-//     if (!deal.loan_type) missingFields.push("Loan Type (e.g. FHA, Conventional)");
-
-//     // 🔁 If something missing → Ask clearly
-//     if (missingFields.length > 0) {
-//       return NextResponse.json({
-//         status: "pending",
-//         deal,
-//         question: `I've updated the deal, but I still need the ${missingFields[0]} to complete the contract.`
-//       });
-//     }
-
-//     return NextResponse.json({
-//       status: "complete",
-//       deal
-//     });
-
-//   } catch (error) {
-//     console.error("Extraction error:", error);
-//     return NextResponse.json({ status: "error", message: "Something went wrong" });
-//   }
-// }
-
-
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import { mockExtractDeal } from "@/lib/mock-extract";
 import { normalizeDeal } from "@/lib/normalize-deal";
+import type { DealData } from "@/types/deal";
 
+// ─── Extraction System Prompt ──────────────────────────────────────────────
 const EXTRACTION_PROMPT = `
-You are a real estate contract extraction AI.
+You are a real estate data extraction engine.
 
-Your job is to extract structured deal information and return a CLEAN REPORT FORMAT.
+Your ONLY job is to extract structured deal fields from a user's message and return them as JSON.
 
-RULES:
-- Extract all available fields from input
-- If field exists → show value
-- If missing → write "MISSING"
-- Do NOT return JSON
-- Return HUMAN READABLE structured text only
-
-FIELDS:
-- address
-- price
-- loan_type
-- closing_date
-- buyer_name
-- seller_concessions
-- inspection_days
-
-OUTPUT FORMAT EXAMPLE:
-
-address: 123 New York  
-price: 45000  
-loan_type: VA  
-closing_date: MISSING  
-buyer_name: Aslan  
-seller_concessions: 5000  
-inspection_days: 15
+FIELDS TO EXTRACT:
+- address        (string: street address only — do NOT include zip code, just street + city + state)
+- price          (number: purchase price in USD, no $ sign or commas)
+- loan_type      (string: e.g. "FHA", "Conventional", "VA", "Cash")
+- closing_date   (string: EXACTLY as said by user, e.g. "April 28", "May 15 2025")
+- buyer_name     (string: full name of buyer)
+- seller_name    (string: full name of seller)
+- seller_concessions (number: seller credit amount in USD, e.g. 5000)
+- inspection_days    (number: inspection period in calendar days, e.g. 10)
 
 STRICT RULES:
-- Always follow same format
-- Never explain anything
-- Never add extra text
+1. If a field is mentioned -> extract it exactly
+2. If a field is NOT mentioned -> return null for that field
+3. NEVER invent or assume values
+4. Return ONLY valid JSON, no extra text
+5. If user is answering a follow-up (e.g. just "John Smith" or "April 28") -> map to the correct missing field based on existingDeal context
+6. For address: strip zip codes. "123 Main St, Springfield, IL 62701" becomes "123 Main St, Springfield, IL"
 `;
+
+// ─── Validation System Prompt ────────────────────────────────────────────────
+const VALIDATION_PROMPT = `
+You are a real estate data validator. Given a field name and a value, determine if it is plausible and real.
+
+Rules:
+- address: Must look like a real street address with a street number and name. City must be a real or plausible US city/area. Return invalid if it looks made-up (e.g. "asdfgh city", random letters).
+- buyer_name / seller_name: Must look like a real human name (first + last name). Not "test", "asdf", "123", etc.
+- price: Must be a number between 10000 and 100000000.
+- closing_date: Must be a plausible date string.
+- loan_type: Must be one of FHA, Conventional, VA, USDA, Cash, Jumbo, or similar recognized mortgage type.
+- inspection_days: Must be a number between 1 and 60.
+
+Return JSON: { "valid": true } or { "valid": false, "reason": "brief human-readable reason" }
+Return ONLY valid JSON, no extra text.
+`;
+
+// ─── Required fields ─────────────────────────────────────────────────────────
+const REQUIRED_FIELDS: (keyof DealData)[] = [
+  "address",
+  "price",
+  "loan_type",
+  "buyer_name",
+  "closing_date",
+];
+
+// ─── Conversational AI-agent style questions ──────────────────────────────────
+const FIELD_QUESTIONS: Record<string, string> = {
+  address: "What's the property address? (street, city, and state)?",
+  price: "What's the purchase price for this property?",
+  loan_type: "How is the buyer financing this? (e.g. FHA, Conventional, VA, or Cash)",
+  buyer_name: "What's the buyer's full name?",
+  closing_date: "What's the target closing date?",
+};
+
+// ─── Validation retry messages ─────────────────────────────────────────────
+const VALIDATION_RETRY: Record<string, string> = {
+  address: "That address doesn't look like a real location. Can you double-check it? (e.g. 123 Main St, Springfield, IL)",
+  buyer_name: "That doesn't look like a real name. Can you provide the buyer's full legal name?",
+  seller_name: "That doesn't look like a real name. Can you provide the seller's full legal name?",
+  price: "That purchase price seems off. Please enter a valid amount (e.g. 450000).",
+  closing_date: "I couldn't parse that as a date. When is the target closing date? (e.g. April 28, 2026)",
+  loan_type: "I don't recognize that loan type. Please use FHA, Conventional, VA, USDA, Cash, or Jumbo.",
+};
+
+// ─── Validate a single field via AI ──────────────────────────────────────────
+async function validateField(
+  client: OpenAI,
+  field: string,
+  value: unknown
+): Promise<{ valid: boolean; reason?: string }> {
+  const validatableFields = ["address", "buyer_name", "seller_name", "price", "closing_date", "loan_type"];
+  if (!validatableFields.includes(field)) return { valid: true };
+  if (value === null || value === undefined || value === "") return { valid: true };
+
+  try {
+    const completion = await client.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        { role: "system", content: VALIDATION_PROMPT },
+        { role: "user", content: `Field: "${field}"\nValue: "${value}"\n\nIs this valid?` },
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0.1,
+    });
+    const raw = completion.choices[0]?.message?.content;
+    if (!raw) return { valid: true };
+    return JSON.parse(raw);
+  } catch {
+    return { valid: true }; // fail open
+  }
+}
 
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as {
       input?: string;
-      existingDeal?: any;
+      existingDeal?: Partial<DealData>;
     };
 
-    const input = body.input || "";
+    const input = body.input?.trim() || "";
     const existingDeal = body.existingDeal || {};
 
-    if (!input.trim()) {
-      return NextResponse.json(
-        { error: "Missing input" },
-        { status: 400 }
-      );
+    if (!input) {
+      return NextResponse.json({ error: "Missing input" }, { status: 400 });
     }
 
     const key = process.env.GROQ_API_KEY;
 
+    // Dev fallback
     if (!key) {
       const mock = mockExtractDeal(input);
-      return NextResponse.json({
-        status: "complete",
-        deal: mock,
-      });
+      return NextResponse.json({ status: "complete", deal: mock });
     }
 
-    // ✅ GROQ CLIENT
     const client = new OpenAI({
       apiKey: key,
       baseURL: "https://api.groq.com/openai/v1",
     });
 
+    // ── Step 1: Extract ────────────────────────────────────────────────────
     const completion = await client.chat.completions.create({
       model: "llama-3.3-70b-versatile",
       messages: [
         { role: "system", content: EXTRACTION_PROMPT },
         {
           role: "user",
-          content: `
-        Existing Deal:
-       ${JSON.stringify(existingDeal, null, 2)}
-
-       User Input:
-       ${input}
-          `,
+          content: `Existing deal data so far:\n${JSON.stringify(existingDeal, null, 2)}\n\nUser message: "${input}"\n\nExtract any new information. Return JSON with all 8 fields (null for anything not mentioned).`,
         },
       ],
-      temperature: 0.2,
       response_format: { type: "json_object" },
+      temperature: 0.1,
     });
 
     const raw = completion.choices[0]?.message?.content;
     if (!raw) throw new Error("No AI response");
 
     const parsed = JSON.parse(raw);
-    const newData = normalizeDeal(parsed);
+    const freshData = normalizeDeal(parsed);
 
-    // ✅ SAFE MERGE (IMPORTANT FIX)
-    const deal = {
-      address:
-        newData.address !== undefined && newData.address !== ""
-          ? newData.address
-          : existingDeal.address ?? null,
+    // ── Step 2: Validate newly extracted fields ────────────────────────────
+    const fieldsToValidate: (keyof DealData)[] = ["address", "buyer_name", "price", "closing_date", "loan_type"];
 
-      price:
-        newData.price !== undefined && newData.price !== null
-          ? newData.price
-          : existingDeal.price ?? null,
+    for (const field of fieldsToValidate) {
+      const newValue = freshData[field];
+      const existingValue = (existingDeal as Record<string, unknown>)[field];
+      if (newValue !== null && newValue !== existingValue) {
+        const result = await validateField(client, field, newValue);
+        if (!result.valid) {
+          // Build deal without the invalid field
+          const safeVal = (f: keyof DealData) =>
+            f === field
+              ? (existingDeal[f] as never) ?? null
+              : (freshData[f] ?? (existingDeal[f] as never) ?? null);
 
-      loan_type:
-        newData.loan_type !== undefined && newData.loan_type !== ""
-          ? newData.loan_type
-          : existingDeal.loan_type ?? null,
+          const dealWithoutInvalid: DealData = {
+            address: safeVal("address"),
+            price: safeVal("price"),
+            loan_type: safeVal("loan_type"),
+            closing_date: safeVal("closing_date"),
+            buyer_name: safeVal("buyer_name"),
+            seller_name: safeVal("seller_name"),
+            seller_concessions: safeVal("seller_concessions"),
+            inspection_days: safeVal("inspection_days"),
+          };
 
-      closing_date:
-        newData.closing_date !== undefined && newData.closing_date !== ""
-          ? newData.closing_date
-          : existingDeal.closing_date ?? null,
+          return NextResponse.json({
+            status: "invalid",
+            deal: dealWithoutInvalid,
+            invalidField: field,
+            question: VALIDATION_RETRY[field] ?? `That ${field} doesn't look right. Could you double-check it?`,
+          });
+        }
+      }
+    }
 
-      buyer_name:
-        newData.buyer_name !== undefined && newData.buyer_name !== ""
-          ? newData.buyer_name
-          : existingDeal.buyer_name ?? null,
-
-      seller_concessions:
-        newData.seller_concessions !== undefined &&
-        newData.seller_concessions !== null
-          ? newData.seller_concessions
-          : existingDeal.seller_concessions ?? null,
-
-      inspection_days:
-        newData.inspection_days !== undefined &&
-        newData.inspection_days !== null
-          ? newData.inspection_days
-          : existingDeal.inspection_days ?? null,
+    // ── Step 3: Merge ──────────────────────────────────────────────────────
+    const deal: DealData = {
+      address: freshData.address ?? (existingDeal.address as string | null) ?? null,
+      price: freshData.price ?? (existingDeal.price as number | null) ?? null,
+      loan_type: freshData.loan_type ?? (existingDeal.loan_type as string | null) ?? null,
+      closing_date: freshData.closing_date ?? (existingDeal.closing_date as string | null) ?? null,
+      buyer_name: freshData.buyer_name ?? (existingDeal.buyer_name as string | null) ?? null,
+      seller_name: freshData.seller_name ?? (existingDeal.seller_name as string | null) ?? null,
+      seller_concessions: freshData.seller_concessions ?? (existingDeal.seller_concessions as number | null) ?? null,
+      inspection_days: freshData.inspection_days ?? (existingDeal.inspection_days as number | null) ?? null,
     };
 
-    return NextResponse.json({
-      status: "success",
-      deal,
+    // ── Step 4: Check missing required fields ──────────────────────────────
+    const missingFields = REQUIRED_FIELDS.filter((field) => {
+      const val = deal[field];
+      return val === null || val === undefined || val === "";
     });
+
+    if (missingFields.length > 0) {
+      const nextField = missingFields[0];
+      const question = FIELD_QUESTIONS[nextField] ?? `Can you provide the ${nextField}?`;
+      return NextResponse.json({
+        status: "incomplete",
+        deal,
+        missingField: nextField,
+        question,
+        remainingCount: missingFields.length,
+      });
+    }
+
+    return NextResponse.json({ status: "complete", deal });
 
   } catch (error) {
     console.error("Extraction error:", error);
-
     return NextResponse.json({
       status: "error",
-      message: "Something went wrong while extracting deal data.",
+      message: "Something went wrong while extracting deal data. Please try again.",
     });
   }
 }
