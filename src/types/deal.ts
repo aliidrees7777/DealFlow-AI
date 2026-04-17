@@ -8,6 +8,7 @@ export type DealData = {
   seller_name: string | null;
   seller_concessions: number | null;
   inspection_days: number | null;
+  status?: string | null;
 };
 
 export type ChatMessage = {

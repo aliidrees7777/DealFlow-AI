@@ -84,6 +84,7 @@ export function mockExtractDeal(input: string): DealData {
     buyer_name: null,
     seller_concessions: null,
     inspection_days: null,
+    seller_name: null
   };
 
   const addr = input.match(

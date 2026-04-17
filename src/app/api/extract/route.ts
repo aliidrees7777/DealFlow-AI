@@ -164,14 +164,14 @@ export async function POST(req: Request) {
               : (freshData[f] ?? (existingDeal[f] as never) ?? null);
 
           const dealWithoutInvalid: DealData = {
-            address: safeVal("address"),
-            price: safeVal("price"),
-            loan_type: safeVal("loan_type"),
-            closing_date: safeVal("closing_date"),
-            buyer_name: safeVal("buyer_name"),
-            seller_name: safeVal("seller_name"),
-            seller_concessions: safeVal("seller_concessions"),
-            inspection_days: safeVal("inspection_days"),
+            address: safeVal("address") as string | null,
+            price: safeVal("price") as number | null,
+            loan_type: safeVal("loan_type") as string | null,
+            closing_date: safeVal("closing_date") as string | null,
+            buyer_name: safeVal("buyer_name") as string | null,
+            seller_name: safeVal("seller_name") as string | null,
+            seller_concessions: safeVal("seller_concessions") as number | null,
+            inspection_days: safeVal("inspection_days") as number | null,
           };
 
           return NextResponse.json({
