@@ -4,83 +4,250 @@ import { mockExtractDeal } from "@/lib/mock-extract";
 import { normalizeDeal } from "@/lib/normalize-deal";
 import type { DealData } from "@/types/deal";
 
-// ─── Extraction System Prompt ──────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// PROMPT 1 — EXTRACTION
+// ─────────────────────────────────────────────────────────────────────────────
 const EXTRACTION_PROMPT = `
-You are a real estate data extraction engine.
+You are a real estate data extraction engine for a luxury brokerage platform.
 
-Your ONLY job is to extract structured deal fields from a user's message and return them as JSON.
+Your job: read the user's message + the existing deal context, then return a JSON object.
 
-FIELDS TO EXTRACT:
-- address        (string: street address only — do NOT include zip code, just street + city + state)
-- price          (number: purchase price in USD, no $ sign or commas)
-- loan_type      (string: e.g. "FHA", "Conventional", "VA", "Cash")
-- closing_date   (string: EXACTLY as said by user, e.g. "April 28", "May 15 2025")
-- buyer_name     (string: full name of buyer)
-- seller_name    (string: full name of seller)
-- seller_concessions (number: seller credit amount in USD, e.g. 5000)
-- inspection_days    (number: inspection period in calendar days, e.g. 10)
+FIELDS TO RETURN (always return all of them):
+- address            (string | null)  — Full street address: number + street + city + state. NO zip code.
+- price              (number | null)  — Purchase price in USD. Digits only, no $ or commas.
+- loan_type          (string | null)  — e.g. "FHA", "Conventional", "VA", "USDA", "Cash", "Jumbo"
+- closing_date       (string | null)  — Exactly as the user said it, e.g. "April 28", "May 1, 2026"
+- buyer_name         (string | null)  — Full name of the buyer
+- seller_name        (string | null)  — Full name of the seller
+- seller_concessions (number | null)  — Seller credit in USD, e.g. 5000
+- inspection_days    (number | null)  — Inspection period in calendar days, e.g. 10
+- address_ambiguous  (boolean)        — true if address is missing, incomplete, or unclear
+- name_role_ambiguous (string | null) — if a name appears but role (buyer/seller) is unclear, put the name here
 
-STRICT RULES:
-1. If a field is mentioned -> extract it exactly
-2. If a field is NOT mentioned -> return null for that field
-3. NEVER invent or assume values
-4. Return ONLY valid JSON, no extra text
-5. If user is answering a follow-up (e.g. just "John Smith" or "April 28") -> map to the correct missing field based on existingDeal context
-6. For address: strip zip codes. "123 Main St, Springfield, IL 62701" becomes "123 Main St, Springfield, IL"
+CRITICAL RULES:
+1. If a field is clearly stated → extract it exactly
+2. If NOT mentioned → return null (never invent values)
+3. For address: ONLY extract if it has a real street number + street name + city/state.
+   "Ali House 451" → address: null, address_ambiguous: true (no street number, no city/state)
+   "House 451, Main Street, NY" → address: "House 451, Main Street, NY", address_ambiguous: false (has location info)
+   "123 Main St, Springfield, IL" → address: "123 Main St, Springfield, IL", address_ambiguous: false
+4. Names in ambiguous context: If "Ali House 451" → Ali could be a person's name.
+   Set name_role_ambiguous: "Ali" ONLY when buyer_name and seller_name are BOTH null in existingDeal.
+   If existingDeal already has buyer_name or seller_name filled → do NOT set name_role_ambiguous.
+5. When user is answering a follow-up (e.g. just "FHA", "John Smith", "May 1"):
+   Look at existingDeal nulls and map the answer to the correct missing field.
+   Do NOT set name_role_ambiguous when user is clearly answering a direct question.
+6. Return ONLY valid JSON. No markdown, no explanation.
+
+MASTER PROMPT EXAMPLE:
+"Write an offer for 123 Main St, FHA, $450,000, closing April 28, seller pays $5,000, inspection 10 days"
+→ address: "123 Main St", price: 450000, loan_type: "FHA", closing_date: "April 28",
+   seller_concessions: 5000, inspection_days: 10, buyer_name: null, seller_name: null,
+   address_ambiguous: false, name_role_ambiguous: null
 `;
 
-// ─── Validation System Prompt ────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// PROMPT 2 — VALIDATION
+// Lenient — only rejects obvious garbage. Accepts international formats.
+// ─────────────────────────────────────────────────────────────────────────────
 const VALIDATION_PROMPT = `
-You are a real estate data validator. Given a field name and a value, determine if it is plausible and real.
+You are a real estate data validator for an AI transaction coordinator.
 
-Rules:
-- address: Must look like a real street address with a street number and name. City must be a real or plausible US city/area. Return invalid if it looks made-up (e.g. "asdfgh city", random letters).
-- buyer_name / seller_name: Must look like a real human name (first + last name). Not "test", "asdf", "123", etc.
-- price: Must be a number between 10000 and 100000000.
-- closing_date: Must be a plausible date string.
-- loan_type: Must be one of FHA, Conventional, VA, USDA, Cash, Jumbo, or similar recognized mortgage type.
-- inspection_days: Must be a number between 1 and 60.
+Given a field name and its extracted value, decide if it is plausible enough to use.
 
-Return JSON: { "valid": true } or { "valid": false, "reason": "brief human-readable reason" }
-Return ONLY valid JSON, no extra text.
+RULES PER FIELD:
+- address: Accept ANY address from ANY country that has some location structure.
+  "House 451, Main Street, NY" ✓  "478-F Block, Johar Town, Lahore" ✓  "123 Main St, IL" ✓
+  Accept addresses even without traditional street numbers if they have a recognizable location name + city/state.
+  ONLY reject: pure random letters like "asdfgh", "test address", zero location info.
+  WHEN IN DOUBT → ACCEPT. It is better to accept a slightly odd address than frustrate the user.
+- buyer_name / seller_name: Accept any human-sounding name from any culture worldwide.
+  Reject only obvious garbage: "test", "asdf", "123", keyboard mashing.
+- price: Accept any number between 10,000 and 100,000,000.
+- closing_date: Accept any plausible date string. Only reject if completely unparseable.
+- loan_type: Accept FHA, Conventional, VA, USDA, Cash, Jumbo, or any recognizable mortgage type.
+- inspection_days: Accept any integer between 1 and 60.
+
+Return ONLY this JSON — no extra text:
+{ "valid": true }
+OR
+{ "valid": false, "reason": "one short sentence" }
 `;
 
-// ─── Required fields ─────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// PROMPT 3 — QUESTION GENERATOR
+// AI writes a fresh natural question every time — no hardcoded strings.
+// ─────────────────────────────────────────────────────────────────────────────
+const QUESTION_PROMPT = `
+You are Alex — a sharp, warm, experienced AI real estate transaction coordinator at a luxury brokerage.
+
+Your job: ask the user for ONE specific piece of information.
+You have the deal context (what's already collected) and know which field is needed next.
+
+STYLE RULES:
+- Vary phrasing every time — never open the same way twice
+- Reference deal details naturally when helpful (e.g. "For the Main St deal...")  
+- Keep it to 1–2 sentences MAX
+- Sound like a human TC who has done this hundreds of times
+- Warm, confident, professional — like a text from a smart colleague
+- ONE question only — never ask two things at once
+
+NEVER SAY:
+- "I need", "Please provide", "Required field", "Can you give me"
+- Numbers, bullet points, or form-like language
+- "I'm an AI" or anything that breaks the human-like feel
+
+GOOD PHRASING EXAMPLES (vary these, don't copy exactly):
+- address:        "Where's the property located? Street, city, and state works."
+- price:          "And the purchase price on this one?"
+- loan_type:      "How's the buyer financing — FHA, Conventional, VA, or cash?"
+- buyer_name:     "Who's the buyer on this deal?"
+- seller_name:    "Got it. And the seller's full name?"
+- closing_date:   "What are we targeting for closing?"
+- ambiguous name: "Quick one — is [NAME] the buyer or the seller here?"
+- bad address:    "Hmm, that address didn't come through clearly — can you give me the full street, city, and state?"
+- validation fail: Gently note the issue and ask again in 1 sentence.
+`;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CONFIG
+// ─────────────────────────────────────────────────────────────────────────────
+
 const REQUIRED_FIELDS: (keyof DealData)[] = [
   "address",
   "price",
   "loan_type",
   "buyer_name",
+  "seller_name",
   "closing_date",
 ];
 
-// ─── Conversational AI-agent style questions ──────────────────────────────────
-const FIELD_QUESTIONS: Record<string, string> = {
-  address: "What's the property address? (street, city, and state)?",
-  price: "What's the purchase price for this property?",
-  loan_type: "How is the buyer financing this? (e.g. FHA, Conventional, VA, or Cash)",
-  buyer_name: "What's the buyer's full name?",
-  closing_date: "What's the target closing date?",
+const VALIDATABLE_FIELDS: (keyof DealData)[] = [
+  "address",
+  "buyer_name",
+  "seller_name",
+  "price",
+  "closing_date",
+  "loan_type",
+];
+
+const CONFIRMATION_PHRASES = [
+  "correct", "move on", "that's right", "yes", "confirm", "is correct",
+  "looks good", "proceed", "right", "yep", "yeah", "ok", "okay",
+  "sure", "go ahead", "continue", "that is correct", "sounds good",
+];
+
+const FIELD_LABELS: Record<string, string> = {
+  address:            "property address (street, city, state)",
+  price:              "purchase price in USD",
+  loan_type:          "financing type (FHA, Conventional, VA, USDA, Cash, or Jumbo)",
+  buyer_name:         "buyer's full legal name",
+  seller_name:        "seller's full legal name",
+  closing_date:       "target closing date",
+  seller_concessions: "seller concessions / closing cost credit in USD",
+  inspection_days:    "inspection period in days",
 };
 
-// ─── Validation retry messages ─────────────────────────────────────────────
-const VALIDATION_RETRY: Record<string, string> = {
-  address: "That address doesn't look like a real location. Can you double-check it? (e.g. 123 Main St, Springfield, IL)",
-  buyer_name: "That doesn't look like a real name. Can you provide the buyer's full legal name?",
-  seller_name: "That doesn't look like a real name. Can you provide the seller's full legal name?",
-  price: "That purchase price seems off. Please enter a valid amount (e.g. 450000).",
-  closing_date: "I couldn't parse that as a date. When is the target closing date? (e.g. April 28, 2026)",
-  loan_type: "I don't recognize that loan type. Please use FHA, Conventional, VA, USDA, Cash, or Jumbo.",
-};
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPER — Detect role assignment like "Ali is seller" or "buyer is John"
+// Runs BEFORE extraction so we don't re-process confirmed data
+// ─────────────────────────────────────────────────────────────────────────────
+function detectRoleAssignment(
+  input: string
+): { name: string; role: "buyer" | "seller" } | null {
+  const lower = input.toLowerCase().trim();
 
-// ─── Validate a single field via AI ──────────────────────────────────────────
+  const patterns = [
+    /^(.+?)\s+is\s+(?:the\s+)?(buyer|seller)$/i,           // "Ali is seller"
+    /^(.+?)\s+is\s+(?:the\s+)?(buyer|seller)\s*\.?$/i,     // "Ali is the seller."
+    /^(buyer|seller)\s+is\s+(?:the\s+)?(.+)$/i,            // "seller is Ali"
+    /^(.+?)\s*[=:]\s*(buyer|seller)$/i,                     // "Ali = seller"
+    /^(?:the\s+)?(buyer|seller)\s*[=:]\s*(.+)$/i,          // "buyer: John Smith"
+  ];
+
+  for (const pattern of patterns) {
+    const match = lower.match(pattern);
+    if (match) {
+      const isBuyerSellerFirst = ["buyer", "seller"].includes(match[1].trim());
+      const rawName = isBuyerSellerFirst ? match[2].trim() : match[1].trim();
+      const roleStr = isBuyerSellerFirst ? match[1].trim() : match[2].trim();
+
+      // Capitalize each word of the name
+      const formattedName = rawName
+        .split(" ")
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(" ");
+
+      return {
+        name: formattedName,
+        role: roleStr === "buyer" ? "buyer" : "seller",
+      };
+    }
+  }
+  return null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPER — Generate a natural AI question
+// ─────────────────────────────────────────────────────────────────────────────
+async function generateQuestion(
+  client: OpenAI,
+  scenario: {
+    type: "missing_field" | "validation_retry" | "ambiguous_name" | "incomplete_address";
+    field?: string;
+    ambiguousName?: string;
+    invalidReason?: string;
+    dealSoFar: Partial<DealData>;
+  }
+): Promise<string> {
+  const { type, field, ambiguousName, invalidReason, dealSoFar } = scenario;
+
+  const knownParts = Object.entries(dealSoFar)
+    .filter(([, v]) => v !== null && v !== undefined && v !== "")
+    .map(([k, v]) => `  ${k}: ${v}`);
+
+  const context =
+    knownParts.length > 0
+      ? `Deal info collected so far:\n${knownParts.join("\n")}`
+      : "No deal info collected yet.";
+
+  let task = "";
+  if (type === "missing_field" && field) {
+    task = `Ask for: "${FIELD_LABELS[field] || field}". This is the next required field.`;
+  } else if (type === "validation_retry" && field) {
+    task = `The user gave an invalid value for "${FIELD_LABELS[field] || field}". Reason: "${invalidReason || "it didn't look right"}". Gently ask them to correct it.`;
+  } else if (type === "ambiguous_name" && ambiguousName) {
+    task = `The name "${ambiguousName}" was mentioned but it's unclear if they are the buyer or the seller. Ask which role they play in this deal.`;
+  } else if (type === "incomplete_address") {
+    task = `The user provided a partial or unclear address. Ask for the full property address with street, city, and state.`;
+  }
+
+  try {
+    const completion = await client.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        { role: "system", content: QUESTION_PROMPT },
+        { role: "user", content: `${context}\n\nTask: ${task}` },
+      ],
+      temperature: 0.85,
+      max_tokens: 80,
+    });
+    const reply = completion.choices[0]?.message?.content?.trim();
+    return reply || `What's the ${FIELD_LABELS[field || ""] || field || "next detail"}?`;
+  } catch {
+    return `What's the ${FIELD_LABELS[field || ""] || field || "next detail"}?`;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPER — Validate a single field value
+// ─────────────────────────────────────────────────────────────────────────────
 async function validateField(
   client: OpenAI,
   field: string,
   value: unknown
 ): Promise<{ valid: boolean; reason?: string }> {
-  const validatableFields = ["address", "buyer_name", "seller_name", "price", "closing_date", "loan_type"];
-  if (!validatableFields.includes(field)) return { valid: true };
+  if (!VALIDATABLE_FIELDS.includes(field as keyof DealData)) return { valid: true };
   if (value === null || value === undefined || value === "") return { valid: true };
 
   try {
@@ -88,10 +255,13 @@ async function validateField(
       model: "llama-3.3-70b-versatile",
       messages: [
         { role: "system", content: VALIDATION_PROMPT },
-        { role: "user", content: `Field: "${field}"\nValue: "${value}"\n\nIs this valid?` },
+        {
+          role: "user",
+          content: `Field: "${field}"\nValue: "${value}"\n\nIs this valid?`,
+        },
       ],
       response_format: { type: "json_object" },
-      temperature: 0.1,
+      temperature: 0,
     });
     const raw = completion.choices[0]?.message?.content;
     if (!raw) return { valid: true };
@@ -101,6 +271,39 @@ async function validateField(
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPER — Merge fresh extraction with existing deal (fresh wins)
+// ─────────────────────────────────────────────────────────────────────────────
+function mergeDeal(fresh: DealData, existing: Partial<DealData>): DealData {
+  return {
+    address:            fresh.address            ?? existing.address            ?? null,
+    price:              fresh.price              ?? existing.price              ?? null,
+    loan_type:          fresh.loan_type          ?? existing.loan_type          ?? null,
+    closing_date:       fresh.closing_date       ?? existing.closing_date       ?? null,
+    buyer_name:         fresh.buyer_name         ?? existing.buyer_name         ?? null,
+    seller_name:        fresh.seller_name        ?? existing.seller_name        ?? null,
+    seller_concessions: fresh.seller_concessions ?? existing.seller_concessions ?? null,
+    inspection_days:    fresh.inspection_days    ?? existing.inspection_days    ?? null,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPER — Merge but exclude one invalid field (revert it to existing value)
+// ─────────────────────────────────────────────────────────────────────────────
+function mergeDealExcluding(
+  fresh: DealData,
+  existing: Partial<DealData>,
+  excludeField: keyof DealData
+): DealData {
+  const merged = mergeDeal(fresh, existing);
+  // Revert the invalid field back to whatever was in existing (or null)
+  (merged[excludeField] as unknown) = existing[excludeField] ?? null;
+  return merged;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MAIN HANDLER
+// ─────────────────────────────────────────────────────────────────────────────
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as {
@@ -117,7 +320,6 @@ export async function POST(req: Request) {
 
     const key = process.env.GROQ_API_KEY;
 
-    // Dev fallback
     if (!key) {
       const mock = mockExtractDeal(input);
       return NextResponse.json({ status: "complete", deal: mock });
@@ -128,75 +330,191 @@ export async function POST(req: Request) {
       baseURL: "https://api.groq.com/openai/v1",
     });
 
-    // ── Step 1: Extract ────────────────────────────────────────────────────
-    const completion = await client.chat.completions.create({
+    // ── STEP 0A: Handle role assignment ("Ali is seller", "buyer is John") ──
+    // Must run BEFORE everything else so we don't re-extract already-resolved info.
+    const roleAssignment = detectRoleAssignment(input);
+    if (roleAssignment) {
+      // Build current deal from existing data
+      const deal = normalizeDeal(existingDeal as Record<string, unknown>);
+
+      // Assign the name to the correct role field
+      if (roleAssignment.role === "buyer") {
+        deal.buyer_name = roleAssignment.name;
+      } else {
+        deal.seller_name = roleAssignment.name;
+      }
+
+      // Check what's still missing
+      const missingFields = REQUIRED_FIELDS.filter((f) => {
+        const val = deal[f];
+        return val === null || val === undefined || val === "";
+      });
+
+      if (missingFields.length > 0) {
+        const nextField = missingFields[0];
+        const question = await generateQuestion(client, {
+          type: "missing_field",
+          field: nextField,
+          dealSoFar: deal,
+        });
+        return NextResponse.json({
+          status: "incomplete",
+          deal,
+          missingField: nextField,
+          question,
+          remainingCount: missingFields.length,
+        });
+      }
+
+      return NextResponse.json({ status: "complete", deal });
+    }
+
+    // ── STEP 0B: Handle simple confirmations ("yes", "correct", "move on") ──
+    const isConfirmation =
+      CONFIRMATION_PHRASES.some((p) => input.toLowerCase().includes(p)) &&
+      Object.keys(existingDeal).length > 0;
+
+    if (isConfirmation) {
+      const deal = normalizeDeal(existingDeal as Record<string, unknown>);
+      const missingFields = REQUIRED_FIELDS.filter((f) => {
+        const val = deal[f];
+        return val === null || val === undefined || val === "";
+      });
+
+      if (missingFields.length > 0) {
+        const nextField = missingFields[0];
+        const question = await generateQuestion(client, {
+          type: "missing_field",
+          field: nextField,
+          dealSoFar: deal,
+        });
+        return NextResponse.json({
+          status: "incomplete",
+          deal,
+          missingField: nextField,
+          question,
+          remainingCount: missingFields.length,
+        });
+      }
+
+      return NextResponse.json({ status: "complete", deal });
+    }
+
+    // ── STEP 1: Extract fields from user message ───────────────────────────
+    const extractCompletion = await client.chat.completions.create({
       model: "llama-3.3-70b-versatile",
       messages: [
         { role: "system", content: EXTRACTION_PROMPT },
         {
           role: "user",
-          content: `Existing deal data so far:\n${JSON.stringify(existingDeal, null, 2)}\n\nUser message: "${input}"\n\nExtract any new information. Return JSON with all 8 fields (null for anything not mentioned).`,
+          content: `Existing deal data:\n${JSON.stringify(existingDeal, null, 2)}\n\nUser message: "${input}"\n\nExtract all fields. Return JSON with all 8 deal fields plus address_ambiguous and name_role_ambiguous.`,
         },
       ],
       response_format: { type: "json_object" },
       temperature: 0.1,
     });
 
-    const raw = completion.choices[0]?.message?.content;
-    if (!raw) throw new Error("No AI response");
+    const raw = extractCompletion.choices[0]?.message?.content;
+    if (!raw) throw new Error("No extraction response from AI");
 
-    const parsed = JSON.parse(raw);
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
     const freshData = normalizeDeal(parsed);
 
-    // ── Step 2: Validate newly extracted fields ────────────────────────────
-    const fieldsToValidate: (keyof DealData)[] = ["address", "buyer_name", "price", "closing_date", "loan_type"];
+    // Pull diagnostic flags
+    const addressAmbiguous = parsed.address_ambiguous === true;
 
-    for (const field of fieldsToValidate) {
+    // FIX: Only fire name_role_ambiguous if BOTH buyer and seller are still unknown
+    // This prevents re-asking after one role has already been resolved
+    const bothNamesMissing = !existingDeal.buyer_name && !existingDeal.seller_name;
+    const nameRoleAmbiguous =
+      bothNamesMissing &&
+      typeof parsed.name_role_ambiguous === "string" &&
+      parsed.name_role_ambiguous.trim()
+        ? parsed.name_role_ambiguous.trim()
+        : null;
+
+    // ── STEP 2: Handle ambiguous name (fires only when both roles are unknown) ──
+    if (nameRoleAmbiguous) {
+      const partialDeal = mergeDeal(freshData, existingDeal);
+      const question = await generateQuestion(client, {
+        type: "ambiguous_name",
+        ambiguousName: nameRoleAmbiguous,
+        dealSoFar: partialDeal,
+      });
+      return NextResponse.json({
+        status: "incomplete",
+        deal: partialDeal,
+        missingField: "buyer_name",
+        question,
+        remainingCount: REQUIRED_FIELDS.filter((f) => {
+          const v = partialDeal[f];
+          return v === null || v === undefined || v === "";
+        }).length,
+      });
+    }
+
+    // ── STEP 3: Handle incomplete / ambiguous address ──────────────────────
+    // Only ask if address is genuinely missing (not already in existingDeal)
+    if (addressAmbiguous && !existingDeal.address && !freshData.address) {
+      const partialDeal = mergeDeal(freshData, existingDeal);
+      const question = await generateQuestion(client, {
+        type: "incomplete_address",
+        dealSoFar: partialDeal,
+      });
+      return NextResponse.json({
+        status: "incomplete",
+        deal: partialDeal,
+        missingField: "address",
+        question,
+        remainingCount: REQUIRED_FIELDS.filter((f) => {
+          const v = partialDeal[f];
+          return v === null || v === undefined || v === "";
+        }).length,
+      });
+    }
+
+    // ── STEP 4: Validate only newly extracted fields ───────────────────────
+    for (const field of VALIDATABLE_FIELDS) {
       const newValue = freshData[field];
       const existingValue = (existingDeal as Record<string, unknown>)[field];
-      if (newValue !== null && newValue !== existingValue) {
-        const result = await validateField(client, field, newValue);
-        if (!result.valid) {
-          // Build deal without the invalid field
-          const safeVal = (f: keyof DealData) =>
-            f === field
-              ? (existingDeal[f] as never) ?? null
-              : (freshData[f] ?? (existingDeal[f] as never) ?? null);
 
-          const dealWithoutInvalid: DealData = {
-            address: safeVal("address") as string | null,
-            price: safeVal("price") as number | null,
-            loan_type: safeVal("loan_type") as string | null,
-            closing_date: safeVal("closing_date") as string | null,
-            buyer_name: safeVal("buyer_name") as string | null,
-            seller_name: safeVal("seller_name") as string | null,
-            seller_concessions: safeVal("seller_concessions") as number | null,
-            inspection_days: safeVal("inspection_days") as number | null,
-          };
+      // Skip if: not a new value, or same as what we already have
+      const isNewValue =
+        newValue !== null &&
+        newValue !== undefined &&
+        newValue !== "" &&
+        newValue !== existingValue;
+
+      if (isNewValue) {
+        const result = await validateField(client, field, newValue);
+
+        if (!result.valid) {
+          const dealWithoutInvalid = mergeDealExcluding(
+            freshData,
+            existingDeal,
+            field as keyof DealData
+          );
+          const question = await generateQuestion(client, {
+            type: "validation_retry",
+            field,
+            invalidReason: result.reason,
+            dealSoFar: dealWithoutInvalid,
+          });
 
           return NextResponse.json({
             status: "invalid",
             deal: dealWithoutInvalid,
             invalidField: field,
-            question: VALIDATION_RETRY[field] ?? `That ${field} doesn't look right. Could you double-check it?`,
+            question,
           });
         }
       }
     }
 
-    // ── Step 3: Merge ──────────────────────────────────────────────────────
-    const deal: DealData = {
-      address: freshData.address ?? (existingDeal.address as string | null) ?? null,
-      price: freshData.price ?? (existingDeal.price as number | null) ?? null,
-      loan_type: freshData.loan_type ?? (existingDeal.loan_type as string | null) ?? null,
-      closing_date: freshData.closing_date ?? (existingDeal.closing_date as string | null) ?? null,
-      buyer_name: freshData.buyer_name ?? (existingDeal.buyer_name as string | null) ?? null,
-      seller_name: freshData.seller_name ?? (existingDeal.seller_name as string | null) ?? null,
-      seller_concessions: freshData.seller_concessions ?? (existingDeal.seller_concessions as number | null) ?? null,
-      inspection_days: freshData.inspection_days ?? (existingDeal.inspection_days as number | null) ?? null,
-    };
+    // ── STEP 5: Merge fresh + existing ────────────────────────────────────
+    const deal = mergeDeal(freshData, existingDeal);
 
-    // ── Step 4: Check missing required fields ──────────────────────────────
+    // ── STEP 6: Check which required fields are still missing ──────────────
     const missingFields = REQUIRED_FIELDS.filter((field) => {
       const val = deal[field];
       return val === null || val === undefined || val === "";
@@ -204,7 +522,12 @@ export async function POST(req: Request) {
 
     if (missingFields.length > 0) {
       const nextField = missingFields[0];
-      const question = FIELD_QUESTIONS[nextField] ?? `Can you provide the ${nextField}?`;
+      const question = await generateQuestion(client, {
+        type: "missing_field",
+        field: nextField,
+        dealSoFar: deal,
+      });
+
       return NextResponse.json({
         status: "incomplete",
         deal,
@@ -214,13 +537,14 @@ export async function POST(req: Request) {
       });
     }
 
+    // ── STEP 7: All required fields present → contract ready ───────────────
     return NextResponse.json({ status: "complete", deal });
 
   } catch (error) {
     console.error("Extraction error:", error);
     return NextResponse.json({
       status: "error",
-      message: "Something went wrong while extracting deal data. Please try again.",
+      message: "Something went wrong while processing your message. Please try again.",
     });
   }
 }

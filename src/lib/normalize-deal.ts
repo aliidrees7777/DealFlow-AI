@@ -31,7 +31,7 @@ function coerceInspectionDays(v: unknown): number | null {
 }
 
 /** Normalize API / JSON blobs into a strict DealData shape. */
-export function normalizeDeal(raw: Partial<Record<keyof DealData, unknown>>): DealData {
+export function normalizeDeal(raw: Partial<Record<string, unknown>>): DealData {
   return {
     address: typeof raw.address === "string" ? raw.address : null,
     price: coercePrice(raw.price),
