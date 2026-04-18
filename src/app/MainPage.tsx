@@ -155,18 +155,14 @@ export default function Home() {
     dealDataRef.current = dealData;
   }, [dealData]);
 
-  const renderContent = () => {
-    switch (activeTab) {
-      // case "Overview":
-      //   return <DealDashboard deal={dealData || {}} />;
-      // case "Contracts":
-      //   return <ContractPreview deal={dealData ?? undefined} />;
-      case "Timeline":
-        return <DealTimeline />;
-      default:
-        return <MasterDashboard />;
-    }
-  };
+  // const renderContent = () => {
+  //   switch (activeTab) {
+  //     case "Timeline":
+  //       return <DealTimeline />;
+  //     default:
+  //       return <MasterDashboard onSend={handleProcessDeal} />;
+  //   }
+  // };
 
   const isContractComplete = !!(
     dealData?.address && dealData?.price && dealData?.buyer_name &&
@@ -190,7 +186,7 @@ export default function Home() {
                 transition={{ duration: 0.3 }}
               >
                 <div className="space-y-6 pb-32">
-                  {renderContent()}
+                  {messages.length === 0 && <MasterDashboard onSend={handleProcessDeal} />}
 
                   {/* Chat history */}
                   <div className="space-y-3 mt-10">
@@ -248,7 +244,7 @@ export default function Home() {
         </AnimatePresence>
       </div>
 
-      <DealInput onSend={handleProcessDeal} />
+      {messages.length > 0 && <DealInput onSend={handleProcessDeal} />}
     </div>
   );
 }
